@@ -259,6 +259,108 @@ func createComponent(_ componentPath: String) {
   }
 }
 
+func deleteComponent(_ componentPath: String) {
+  /*
+   new empty newLines
+   for line in lines
+    if line matches regex
+     add to line to newLines
+   */
+  let fileManager = FileManager.default
+  let componentsDirectoryURL = pcct.projectURL.appendingPathComponent("src/components")
+  let componentsFileURL = pcct.projectURL.appendingPathComponent("src/config/components.ts")
+  let htmlTemplatesFileURL = pcct.projectURL.appendingPathComponent("src/index.html")
+  let stylesFileURL = pcct.projectURL.appendingPathComponent("src/styles/main.css")
+  var importLinesToRemove = [Int]()
+
+  if fileManager.fileExists(atPath: componentsDirectoryURL.path + "/" + componentPath + "/") {
+    do {
+      // remove from components
+      do {
+        let fileContent = try String(contentsOf: componentsFileURL)
+        let lines = fileContent.components(separatedBy: .newlines)
+        
+        let startOfExportLines = lines.firstIndex(of: "export const components: ComponentDefinition[] = [")!
+        let endOfExportLines = lines.firstIndex(of: "];")!
+        
+        let needle = "/components/" + componentPath
+        let pattern = "\(needle)\\/.*"
+        let regex = try NSRegularExpression(pattern: pattern)
+        
+        for (index, line) in lines.enumerated() {
+          let matchesInLine = regex.matches(in: line, range: NSRange(line.startIndex..., in: line))
+          if matchesInLine.count > 0 {
+            importLinesToRemove.append(index)
+          }
+        }
+        let allLinesToRemove = importLinesToRemove + importLinesToRemove.map({ index in index + startOfExportLines })
+        let allLinesToKeep = Set(lines.indices).subtracting(allLinesToRemove)
+        let newLinesDict = lines.enumerated().filter({ allLinesToKeep.contains($0.0) })
+        var newLines = newLinesDict.map({ $0.element })
+        let endOfNewExportLines = newLines.firstIndex(of: "];")!
+        
+        if allLinesToRemove.contains(endOfExportLines - 1 ) {
+          newLines[endOfNewExportLines - 1] = String(newLines[endOfNewExportLines - 1][..<newLines[endOfNewExportLines - 1].index(newLines[endOfNewExportLines - 1].endIndex, offsetBy: -1)])
+        }
+        
+        let newFileContent = newLines.joined(separator: "\n")
+        try newFileContent.write(to: componentsFileURL, atomically: true, encoding: .utf8)
+      }
+      catch {
+        print("Could not remove component from config/components.ts.")
+      }
+      
+      // remove from HTML
+      do {
+        let fileContent = try String(contentsOf: htmlTemplatesFileURL)
+        let lines = fileContent.components(separatedBy: .newlines)
+        
+        let startOfComponentLines = lines.firstIndex(of: "    <!-- Component templates -->")!
+        
+        let allLinesToRemove = importLinesToRemove.map({ index in index + startOfComponentLines })
+        let allLinesToKeep = Set(lines.indices).subtracting(allLinesToRemove)
+        let newLinesDict = lines.enumerated().filter({ allLinesToKeep.contains($0.0) })
+        let newLines = newLinesDict.map({ $0.element })
+        
+        let newFileContent = newLines.joined(separator: "\n")
+        try newFileContent.write(to: htmlTemplatesFileURL, atomically: true, encoding: .utf8)
+      }
+      catch {
+        print("Could not remove component from index.html.")
+      }
+      
+      // remove from CSS
+      do {
+        let fileContent = try String(contentsOf: stylesFileURL)
+        let lines = fileContent.components(separatedBy: .newlines)
+        let startOfComponentLines = lines.firstIndex(of: "/* Component styles */")!
+        
+        let allLinesToRemove = importLinesToRemove.map({ index in index + startOfComponentLines })
+        let allLinesToKeep = Set(lines.indices).subtracting(allLinesToRemove)
+        let newLinesDict = lines.enumerated().filter({ allLinesToKeep.contains($0.0) })
+        let newLines = newLinesDict.map({ $0.element })
+        
+        let newFileContent = newLines.joined(separator: "\n")
+        try newFileContent.write(to: stylesFileURL, atomically: true, encoding: .utf8)
+      }
+      catch {
+        print("Could not remove component from styles/main.css.")
+      }
+      
+//      try fileManager.removeItem(atPath: componentsDirectoryURL.path + "/" + componentPath + "/")
+      let wasteURL = URL(fileURLWithPath: componentsDirectoryURL.path + "/" + componentPath + "/")
+      try fileManager.trashItem(at: wasteURL, resultingItemURL: nil)
+//      print("Successfully removed component at \(componentsDirectoryURL.path + "/" + componentPath + "/")")
+    }
+    catch {
+      print("Was not able to delete component.")
+    }
+  } else {
+    print("You are trying to delete a component that does not exist.")
+  }
+}
+
+
 let argumentCount = CommandLine.argc - 1
 let arguments = CommandLine.arguments
 let (option, value) = getOption(arguments[1])
@@ -287,6 +389,21 @@ case .createComponent:
     createComponent(arguments[2])
   }
 case .moveComponent: break
-case .deleteComponent: break
+case .deleteComponent:
+  if argumentCount != 2 {
+    if argumentCount > 2 {
+      print("Too many arguments for \(option) option. Should have two.")
+    } else {
+      print("Too few arguments for \(option) option. Should have two.")
+    }
+  } else {
+    print("Are you sure you want to delete the \(arguments[2]) component? (y/n)")
+    let response = readLine()
+    if response == "y" {
+      deleteComponent(arguments[2])
+    } else {
+      print("\(arguments[2]) component was not deleted.")
+    }
+  }
 case .unspecified: print("You're doing something wrong.")
 }
