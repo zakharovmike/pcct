@@ -8,10 +8,6 @@
 
 import Foundation
 
-/*
- [] in addToComponents, change back to single quotes instead of escaped doubles
- */
-
 var projectURL: URL!
 var dataFileURL: URL!
 
@@ -144,8 +140,7 @@ func addToComponents(_ componentPath: String) -> Int {
     let startOfExportLines = lines.firstIndex(of: "export const components: ComponentDefinition[] = [")!
     let endOfExportLines = lines.firstIndex(of: "];")!
 
-    // Change back to unescaped single quotes
-    let newImportPath = "\"../components/" + componentPath + "/" + componentName + ".component\";"
+    let newImportPath = "'../components/" + componentPath + "/" + componentName + ".component';"
     let newImportLine = "import { " + camelCaseComponentName + "Component" + " } from " + newImportPath
     
     var pathsOfImportLines = importLines.map({ line in line.components(separatedBy: " ")[5] })
@@ -259,13 +254,212 @@ func createComponent(_ componentPath: String) {
   }
 }
 
+func moveComponent(from: String, to: String) {
+  let fileManager = FileManager.default
+  let componentsDirectoryURL = pcct.projectURL.appendingPathComponent("src/components")
+  let componentsFileURL = pcct.projectURL.appendingPathComponent("src/config/components.ts")
+  let htmlTemplatesFileURL = pcct.projectURL.appendingPathComponent("src/index.html")
+  let stylesFileURL = pcct.projectURL.appendingPathComponent("src/styles/main.css")
+  let oldComponentPath = componentsDirectoryURL.path + "/" + from + "/"
+  let newComponentPath = componentsDirectoryURL.path + "/" + to + "/"
+  
+  let oldComponentName = from.split(separator: "/").last!
+  let oldComponentNameSplit = oldComponentName.split(separator: "-")
+  let oldComponentNameSplitCapped = oldComponentNameSplit.map({ word in word.capitalized  })
+  let oldCamelCaseComponentName = oldComponentNameSplitCapped.joined() + "Component"
+  
+  let newComponentName = to.split(separator: "/").last!
+  let newComponentNameSplit = newComponentName.split(separator: "-")
+  let newComponentNameSplitCapped = newComponentNameSplit.map({ word in word.capitalized  })
+  let newCamelCaseComponentName = newComponentNameSplitCapped.joined() + "Component"
+  
+  let oldPath = "/components/" + from
+  let newPath = "/components/" + to
+  
+  if fileManager.fileExists(atPath: oldComponentPath) {
+    if fileManager.fileExists(atPath: newComponentPath) {
+      print("You are trying to move to a component that already exists.")
+    } else {
+      do {
+        // cannot at this point move two to one/two where one is a non-existent directory
+        try fileManager.moveItem(atPath: oldComponentPath, toPath: newComponentPath)
+        
+        // rearrange components
+        do {
+          let fileContent = try String(contentsOf: componentsFileURL)
+          var lines = fileContent.components(separatedBy: .newlines)
+          
+          var oldComponentIndices = [Int]()
+          var newComponentIndices = [Int]()
+          
+          for (index, line) in lines.enumerated() {
+            if line.contains(oldPath) && line.contains(oldCamelCaseComponentName) {
+              lines[index] = line.replacingOccurrences(of: oldPath + "/\(oldComponentName).component", with: newPath + "/\(newComponentName).component").replacingOccurrences(of: oldCamelCaseComponentName, with: newCamelCaseComponentName)
+              oldComponentIndices.append(index)
+            } else if line.contains(oldPath) {
+              lines[index] = line.replacingOccurrences(of: oldPath, with: newPath)
+              oldComponentIndices.append(index)
+            }
+          }
+          
+          let importLines = lines[1..<lines.count].filter({ line in line.hasPrefix("import") })
+          let startOfExportLines = lines.firstIndex(of: "export const components: ComponentDefinition[] = [")!
+          let endOfExportLines = lines.firstIndex(of: "];")!
+          let pathsOfImportLines = importLines.map({ line in line.components(separatedBy: " ")[5] })
+          
+          func incOrder(_ lineOne: String, _ lineTwo: String) -> Bool {
+            var toCompareOne: String!
+            var toCompareTwo: String!
+            
+            for line in pathsOfImportLines {
+              if lineOne.contains(line) {
+                toCompareOne = line
+              }
+              if lineTwo.contains(line) {
+                toCompareTwo = line
+              }
+            }
+            
+            return toCompareOne < toCompareTwo
+          }
+          
+          lines[lines.index(of: importLines.first!)!...lines.index(of: importLines.last!)!].sort(by: { incOrder($0, $1) })
+          
+          for (index, line) in lines.enumerated() {
+            if line.contains(newPath) {
+              newComponentIndices.append(index)
+            }
+          }
+          
+          var swapArray = [String]()
+          for i in 0..<oldComponentIndices.count {
+            if lines[startOfExportLines...endOfExportLines - 1][oldComponentIndices[i] + startOfExportLines] == "  \(oldCamelCaseComponentName)," || lines[startOfExportLines...endOfExportLines - 1][oldComponentIndices[i] + startOfExportLines] == "  \(oldCamelCaseComponentName)" {
+              swapArray.append("  \(newCamelCaseComponentName),")
+            } else {
+              swapArray.append(lines[startOfExportLines...endOfExportLines - 1][oldComponentIndices[i] + startOfExportLines])
+            }
+          }
+          swapArray.sort()
+          
+          lines[startOfExportLines...endOfExportLines - 1].removeSubrange(oldComponentIndices.first! + startOfExportLines...oldComponentIndices.last! + startOfExportLines)
+          
+          if newComponentIndices.last! + startOfExportLines == endOfExportLines - 1 {
+            lines[endOfExportLines - swapArray.count - 1] += ","
+            swapArray[swapArray.count - 1] = String(swapArray[swapArray.count - 1][..<swapArray[swapArray.count - 1].index(swapArray[swapArray.count - 1].endIndex, offsetBy: -1)])
+          } else if oldComponentIndices.last! + startOfExportLines == endOfExportLines - 1 {
+            lines[endOfExportLines - swapArray.count - 1] = String(lines[endOfExportLines - swapArray.count - 1][..<lines[endOfExportLines - swapArray.count - 1].index(lines[endOfExportLines - swapArray.count - 1].endIndex, offsetBy: -1)])
+          }
+          
+          lines.insert(contentsOf: swapArray, at: newComponentIndices.first! + startOfExportLines)
+          
+          let newFileContent = lines.joined(separator: "\n")
+          try newFileContent.write(to: componentsFileURL, atomically: true, encoding: .utf8)
+        }
+        catch {
+          print("Could not rearrange config/components.ts.")
+        }
+        
+        // rearrange HTML
+        do {
+          let fileContent = try String(contentsOf: htmlTemplatesFileURL)
+          var lines = fileContent.components(separatedBy: .newlines)
+          let startOfComponentLines = lines.firstIndex(of: "    <!-- Component templates -->")!
+          let endOfComponentLines = lines.firstIndex(of: "  </body>")!
+          
+          for (index, line) in lines.enumerated() {
+            if line.contains(oldPath + "/\(oldComponentName).template") {
+              lines[index] = line.replacingOccurrences(of: oldPath + "/\(oldComponentName).template", with: newPath + "/\(newComponentName).template")
+            } else if line.contains(oldPath) {
+              lines[index] = line.replacingOccurrences(of: oldPath, with: newPath)
+            }
+          }
+          
+          lines[startOfComponentLines + 1...endOfComponentLines - 1].sort()
+          
+          let newFileContent = lines.joined(separator: "\n")
+          try newFileContent.write(to: htmlTemplatesFileURL, atomically: true, encoding: .utf8)
+        }
+        catch {
+          print("Could not rearrange index.html.")
+        }
+        
+        // rearrange CSS
+        do {
+          let fileContent = try String(contentsOf: stylesFileURL)
+          var lines = fileContent.components(separatedBy: .newlines)
+          let startOfComponentLines = lines.firstIndex(of: "/* Component styles */")!
+          
+          for (index, line) in lines.enumerated() {
+            if line.contains(oldPath + "/\(oldComponentName).styles") {
+              lines[index] = line.replacingOccurrences(of: oldPath + "/\(oldComponentName).styles", with: newPath + "/\(newComponentName).styles")
+            } else if line.contains(oldPath) {
+              lines[index] = line.replacingOccurrences(of: oldPath, with: newPath)
+            }
+          }
+          
+          lines[startOfComponentLines + 1..<lines.endIndex - 1].sort()
+          
+          let newFileContent = lines.joined(separator: "\n")
+          try newFileContent.write(to: stylesFileURL, atomically: true, encoding: .utf8)
+        }
+        catch {
+          print("Could not rearrange styles/main.css.")
+        }
+        
+        // rename inside component file and file itself
+        do {
+          try fileManager.moveItem(atPath: newComponentPath + oldComponentName + ".component.ts", toPath: newComponentPath + newComponentName + ".component.ts")
+          
+          let fileContent = try String(contentsOfFile: newComponentPath + newComponentName + ".component.ts")
+          let lines = fileContent.components(separatedBy: .newlines)
+          let newLines = lines.map({ line in line.replacingOccurrences(of: oldCamelCaseComponentName, with: newCamelCaseComponentName) })
+          let newFileContent = newLines.joined(separator: "\n")
+          try newFileContent.write(toFile: newComponentPath + newComponentName + ".component.ts", atomically: true, encoding: .utf8)
+        }
+        catch {
+          print("Could not rename component file name in src/components/\(to)")
+        }
+        
+        // rename inside HTML file and file itself
+        do {
+          try fileManager.moveItem(atPath: newComponentPath + oldComponentName + ".template.html", toPath: newComponentPath + newComponentName + ".template.html")
+          
+          let fileContent = try String(contentsOfFile: newComponentPath + newComponentName + ".template.html")
+          let lines = fileContent.components(separatedBy: .newlines)
+          let newLines = lines.map({ line in line.replacingOccurrences(of: oldCamelCaseComponentName, with: newCamelCaseComponentName) })
+          let newFileContent = newLines.joined(separator: "\n")
+          try newFileContent.write(toFile: newComponentPath + newComponentName + ".template.html", atomically: true, encoding: .utf8)
+        }
+        catch {
+          print("Could not rename HTML file name in src/components/\(to)")
+        }
+        
+        // rename inside CSS file and file itself
+        do {
+          try fileManager.moveItem(atPath: newComponentPath + oldComponentName + ".styles.css", toPath: newComponentPath + newComponentName + ".styles.css")
+          
+          let fileContent = try String(contentsOfFile: newComponentPath + newComponentName + ".styles.css")
+          let lines = fileContent.components(separatedBy: .newlines)
+          let newLines = lines.map({ line in line.replacingOccurrences(of: "app-" + oldComponentName, with: "app-" + newComponentName) })
+          let newFileContent = newLines.joined(separator: "\n")
+          try newFileContent.write(toFile: newComponentPath + newComponentName + ".styles.css", atomically: true, encoding: .utf8)
+        }
+        catch {
+          print("Could not rename CSS file name in src/components/\(to)")
+        }
+        
+        print("NOTE: any use of \(String(oldComponentNameSplit.first!.first!) + oldComponentNameSplitCapped.joined().dropFirst()) in other components or HTML files must be manually changed to \(String(newComponentNameSplit.first!.first!) + newComponentNameSplitCapped.joined().dropFirst()) !")
+      }
+      catch {
+        print("Could not move \(oldComponentName) from \(oldComponentPath) to \(newComponentPath)")
+      }
+    }
+  } else {
+    print("You are trying to move a component that does not exist.")
+  }
+}
+
 func deleteComponent(_ componentPath: String) {
-  /*
-   new empty newLines
-   for line in lines
-    if line matches regex
-     add to line to newLines
-   */
   let fileManager = FileManager.default
   let componentsDirectoryURL = pcct.projectURL.appendingPathComponent("src/components")
   let componentsFileURL = pcct.projectURL.appendingPathComponent("src/config/components.ts")
@@ -388,7 +582,22 @@ case .createComponent:
   } else {
     createComponent(arguments[2])
   }
-case .moveComponent: break
+case .moveComponent:
+  if argumentCount != 3 {
+    if argumentCount > 3 {
+      print("Too many arguments for \(option) option. Should have three.")
+    } else {
+      print("Too few arguments for \(option) option. Should have three.")
+    }
+  } else {
+    print("Are you sure you want to move the \(arguments[2]) component to \(arguments[3])? (y/n)")
+    let response = readLine()
+    if response == "y" {
+      moveComponent(from: arguments[2], to: arguments[3])
+    } else {
+      print("\(arguments[2]) component was not moved to \(arguments[3]).")
+    }
+  }
 case .deleteComponent:
   if argumentCount != 2 {
     if argumentCount > 2 {
