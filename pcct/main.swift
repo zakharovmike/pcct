@@ -37,7 +37,7 @@ func initialize(_ option: OptionType) {
   let fileManager = FileManager.default
   let defaultDataFileURL: URL
   do {
-    defaultDataFileURL = (try fileManager.url(for: .desktopDirectory, in: .userDomainMask, appropriateFor: nil, create: false)).appendingPathComponent("pcct/savedData")
+    defaultDataFileURL = (try fileManager.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false)).appendingPathComponent("pcct/savedData")
     
     if fileManager.fileExists(atPath: defaultDataFileURL.path) {
       do {
@@ -68,7 +68,7 @@ func setProjectPath(_ path: String) {
   let fileManager = FileManager.default
   
   do {
-    let appSupportURL = try fileManager.url(for: .desktopDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
+    let appSupportURL = try fileManager.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
     pcct.dataFileURL = appSupportURL.appendingPathComponent("pcct/savedData")
     
     var isDirectory: ObjCBool = false
@@ -557,6 +557,10 @@ func deleteComponent(_ componentPath: String) {
 
 let argumentCount = CommandLine.argc - 1
 let arguments = CommandLine.arguments
+if arguments.count < 2 {
+  print("Supply at least one arguement please.")
+  exit(0)
+}
 let (option, value) = getOption(arguments[1])
 
 initialize(option)
