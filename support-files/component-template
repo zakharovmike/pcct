@@ -1,0 +1,8 @@
+import { Component, Model } from '@placardi/xynohm';
+
+export class <name-here> extends Component {
+  constructor(model: Model, uuid: string, element: HTMLElement) {
+    super(model, uuid, element);
+  }
+  
+}
